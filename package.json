@@ -1,0 +1,21 @@
+{
+  "name": "descomplicarafao-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Painel de controle operacional diário com faturamento, processos, agenda, câmeras e rastreamento",
+  "main": "server/index.js",
+  "scripts": {
+    "dev": "node server/index.js",
+    "start": "node server/index.js",
+    "lint": "echo \"No lint configured\"",
+    "typecheck": "echo \"No typecheck configured\""
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0",
+    "jsonwebtoken": "^9.0.2",
+    "uuid": "^9.0.1",
+    "date-fns": "^3.6.0",
+    "dotenv": "^16.4.5"
+  }
+}
