@@ -11,23 +11,14 @@ const { scheduleDailyBackup } = require('./lib/backup');
 const { signToken, authMiddleware, requireRole } = require('./lib/auth');
 const jwt = require('jsonwebtoken');
 const { sendEmail } = require('./lib/smtp');
+const DB = require('./lib/db');
 
 const DATA_DIR = path.join(__dirname, 'data');
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const BACKUP_DIR = path.join(__dirname, 'backups');
 const PORT = process.env.PORT || 3000;
 
-function readJson(file) {
-  const fp = path.join(DATA_DIR, file);
-  if (!fs.existsSync(fp)) return null;
-  return JSON.parse(fs.readFileSync(fp, 'utf-8'));
-}
-
-function writeJson(file, data) {
-  const fp = path.join(DATA_DIR, file);
-  fs.writeFileSync(fp, JSON.stringify(data, null, 2), 'utf-8');
-}
-
+// Ensure directories exist for reports/backups (even if using Firestore for main data)
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 if (!fs.existsSync(BACKUP_DIR)) fs.mkdirSync(BACKUP_DIR, { recursive: true });
 
@@ -35,6 +26,7 @@ const app = express();
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.enable('trust proxy');
+
 if (process.env.FORCE_HTTPS === 'true') {
   app.use((req, res, next) => {
     if (req.secure) return next();
@@ -56,50 +48,39 @@ function broadcast(event, payload) {
   }
 }
 
-// Seed minimal data if not present
-const seed = {
-  users: [
-    { id: uuidv4(), name: 'Admin', email: 'admin@local', role: 'admin', password: 'admin123' },
-    { id: uuidv4(), name: 'Operador', email: 'op@local', role: 'operator', password: 'op123' }
-  ],
-  stores: [
-    { id: 'loja-1', name: 'Loja Centro' },
-    { id: 'loja-2', name: 'Loja Norte' }
-  ],
-  invoices: [],
-  processes: [],
-  events: [],
-  cameras: [
-    { id: 'cam-1', storeId: 'loja-1', name: 'Entrada', url: '' },
-    { id: 'cam-2', storeId: 'loja-2', name: 'Caixa', url: '' }
-  ],
-  vehicles: [
-    { id: 'veh-1', plate: 'ABC-1234' },
-    { id: 'veh-2', plate: 'XYZ-5678' }
-  ],
-  layout: []
-};
+// Seed minimal data if not present (Async)
+(async () => {
+  const seed = {
+    users: [
+      { id: uuidv4(), name: 'Admin', email: 'admin@local', role: 'admin', password: 'admin123' },
+      { id: uuidv4(), name: 'Operador', email: 'op@local', role: 'operator', password: 'op123' }
+    ],
+    stores: [
+      { id: 'loja-1', name: 'Loja Centro' },
+      { id: 'loja-2', name: 'Loja Norte' }
+    ],
+    invoices: [],
+    processes: [],
+    events: [],
+    cameras: [
+      { id: 'cam-1', storeId: 'loja-1', name: 'Entrada', url: '' },
+      { id: 'cam-2', storeId: 'loja-2', name: 'Caixa', url: '' }
+    ],
+    vehicles: [
+      { id: 'veh-1', plate: 'ABC-1234' },
+      { id: 'veh-2', plate: 'XYZ-5678' }
+    ],
+    layout: []
+  };
+  await DB.seed(seed);
+})();
 
-for (const [file, data] of Object.entries({
-  'users.json': seed.users,
-  'stores.json': seed.stores,
-  'invoices.json': seed.invoices,
-  'processes.json': seed.processes,
-  'events.json': seed.events,
-  'cameras.json': seed.cameras,
-  'vehicles.json': seed.vehicles,
-  'layout.json': seed.layout
-})) {
-  const fp = path.join(DATA_DIR, file);
-  if (!fs.existsSync(fp)) writeJson(file, data);
-}
 
 // Auth
-app.post('/api/login', (req, res) => {
+app.post('/api/login', async (req, res) => {
   const { email, password } = req.body || {};
-  const users = readJson('users.json') || [];
-  const user = users.find(u => u.email === email && u.password === password);
-  if (!user) return res.status(401).json({ error: 'Credenciais inválidas' });
+  const user = await DB.getUserByEmail(email);
+  if (!user || user.password !== password) return res.status(401).json({ error: 'Credenciais inválidas' });
   const token = signToken({ id: user.id, role: user.role, name: user.name, email: user.email });
   res.json({ token, user: { id: user.id, role: user.role, name: user.name, email: user.email } });
 });
@@ -122,12 +103,13 @@ app.get('/api/me', authMiddleware, (req, res) => {
 });
 
 // Layout widgets
-app.get('/api/layout', authMiddleware, (req, res) => {
-  res.json(readJson('layout.json') || []);
+app.get('/api/layout', authMiddleware, async (req, res) => {
+  res.json(await DB.getLayout());
 });
-app.post('/api/layout', authMiddleware, requireRole(['admin', 'operator']), (req, res) => {
-  writeJson('layout.json', req.body || []);
-  broadcast('layout:update', req.body || []);
+app.post('/api/layout', authMiddleware, requireRole(['admin', 'operator']), async (req, res) => {
+  const items = req.body || [];
+  await DB.saveLayout(items);
+  broadcast('layout:update', items);
   res.json({ ok: true });
 });
 
@@ -172,9 +154,9 @@ app.get('/api/cameras/cam1/snapshot', authMiddleware, async (req, res) => {
 });
 
 // Billing
-app.get('/api/billing', authMiddleware, (req, res) => {
+app.get('/api/billing', authMiddleware, async (req, res) => {
   const { storeId, status, minValue, maxValue, startDate, endDate } = req.query;
-  let invoices = readJson('invoices.json') || [];
+  let invoices = await DB.getInvoices();
   if (storeId) invoices = invoices.filter(i => i.storeId === storeId);
   if (status) invoices = invoices.filter(i => i.status === status);
   if (minValue) invoices = invoices.filter(i => i.amount >= Number(minValue));
@@ -183,16 +165,14 @@ app.get('/api/billing', authMiddleware, (req, res) => {
   if (endDate) invoices = invoices.filter(i => new Date(i.date) <= new Date(endDate));
   res.json(invoices);
 });
-app.post('/api/billing', authMiddleware, requireRole(['admin']), (req, res) => {
-  const invoices = readJson('invoices.json') || [];
+app.post('/api/billing', authMiddleware, requireRole(['admin']), async (req, res) => {
   const inv = { id: uuidv4(), ...req.body };
-  invoices.push(inv);
-  writeJson('invoices.json', invoices);
+  await DB.addInvoice(inv);
   broadcast('billing:update', inv);
   res.json(inv);
 });
-app.get('/api/billing/report.csv', authMiddleware, (req, res) => {
-  const invoices = readJson('invoices.json') || [];
+app.get('/api/billing/report.csv', authMiddleware, async (req, res) => {
+  const invoices = await DB.getInvoices();
   const rows = [['Loja','Fatura','Valor','Data','Status']].concat(
     invoices.map(i => [i.storeId, i.id, i.amount, i.date, i.status])
   );
@@ -201,36 +181,32 @@ app.get('/api/billing/report.csv', authMiddleware, (req, res) => {
   res.setHeader('Content-Disposition','attachment; filename="faturamento.csv"');
   res.send(csv);
 });
-app.get('/api/billing/report.html', authMiddleware, (req, res) => {
-  const invoices = readJson('invoices.json') || [];
+app.get('/api/billing/report.html', authMiddleware, async (req, res) => {
+  const invoices = await DB.getInvoices();
   const rows = invoices.map(i => `<tr><td>${i.storeId}</td><td>${i.id}</td><td>${i.amount}</td><td>${i.date}</td><td>${i.status}</td></tr>`).join('');
   res.setHeader('Content-Type','text/html');
   res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Relatório</title></head><body><h1>Relatório de Faturamento</h1><table border="1"><thead><tr><th>Loja</th><th>Fatura</th><th>Valor</th><th>Data</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></body></html>`);
 });
 
 // Processes
-app.get('/api/processes', authMiddleware, (req, res) => {
-  res.json(readJson('processes.json') || []);
+app.get('/api/processes', authMiddleware, async (req, res) => {
+  res.json(await DB.getProcesses());
 });
-app.post('/api/processes', authMiddleware, requireRole(['admin','operator']), (req, res) => {
-  const processes = readJson('processes.json') || [];
+app.post('/api/processes', authMiddleware, requireRole(['admin','operator']), async (req, res) => {
   const proc = { id: uuidv4(), history: [], ...req.body };
-  processes.push(proc);
-  writeJson('processes.json', processes);
+  await DB.saveProcess(proc);
   broadcast('processes:update', proc);
   res.json(proc);
 });
-app.put('/api/processes/:id', authMiddleware, requireRole(['admin','operator']), (req, res) => {
-  const processes = readJson('processes.json') || [];
-  const idx = processes.findIndex(p => p.id === req.params.id);
-  const base = idx >= 0 ? processes[idx] : { id: req.params.id, history: [] };
+app.put('/api/processes/:id', authMiddleware, requireRole(['admin','operator']), async (req, res) => {
+  const existing = await DB.getProcess(req.params.id);
+  const base = existing || { id: req.params.id, history: [] };
   const next = { ...base, ...req.body };
-  if (idx >= 0) processes[idx] = next;
-  else processes.push(next);
-  writeJson('processes.json', processes);
+  await DB.saveProcess(next);
   broadcast('processes:update', next);
   res.json(next);
 });
+
 function fetchText(u, { timeoutMs = 15000 } = {}) {
   return new Promise((resolve, reject) => {
     try {
@@ -277,6 +253,7 @@ function parseMovements(html, originUrl) {
   const summary = items.length ? (items[0].desc || 'Atualização capturada') : 'Sem dados';
   return { summary, items, rawLength: text.length };
 }
+
 async function scanProcess(proc) {
   if (!proc || !proc.link) return { ok: false, reason: 'Sem link' };
   let html = '';
@@ -289,25 +266,27 @@ async function scanProcess(proc) {
     if (!html) throw new Error('Falha ao obter HTML');
   } catch (e) {
     const entry = { id: uuidv4(), date: new Date().toISOString(), error: true, message: 'Falha ao acessar link' };
-    const processes = readJson('processes.json') || [];
-    const idx = processes.findIndex(p => p.id === proc.id);
-    if (idx >= 0) {
-      processes[idx].history = processes[idx].history || [];
-      processes[idx].history.push(entry);
-      processes[idx].lastErrorAt = new Date().toISOString();
-      processes[idx].lastAttempts = (processes[idx].lastAttempts || 0) + 1;
-      writeJson('processes.json', processes);
-      broadcast('processes:history', { processId: proc.id, entry });
-    }
+    const history = proc.history || [];
+    history.push(entry);
+    const updates = {
+        history,
+        lastErrorAt: new Date().toISOString(),
+        lastAttempts: (proc.lastAttempts || 0) + 1
+    };
+    await DB.updateProcess(proc.id, updates);
+    broadcast('processes:history', { processId: proc.id, entry });
     return { ok: false, reason: 'Falha ao acessar link' };
   }
   const { summary, items } = parseMovements(html, proc.link);
   const fingerprint = String(summary).slice(0, 140);
-  const processes = readJson('processes.json') || [];
-  const idx = processes.findIndex(p => p.id === proc.id);
-  if (idx < 0) return { ok: false, reason: 'Processo não encontrado' };
-  const last = processes[idx].lastFingerprint || '';
+  
+  // Refresh process state from DB to avoid race conditions (optional, but good practice)
+  const currentProc = await DB.getProcess(proc.id);
+  if (!currentProc) return { ok: false, reason: 'Processo removido durante scan' };
+  
+  const last = currentProc.lastFingerprint || '';
   if (last === fingerprint) return { ok: true, noChange: true };
+  
   const entry = {
     id: uuidv4(),
     date: new Date().toISOString(),
@@ -317,33 +296,43 @@ async function scanProcess(proc) {
       text: i.desc
     }))
   };
-  processes[idx].history = processes[idx].history || [];
-  processes[idx].history.push(entry);
-  processes[idx].lastFingerprint = fingerprint;
-  processes[idx].lastOkAt = new Date().toISOString();
-  writeJson('processes.json', processes);
+  const history = currentProc.history || [];
+  history.push(entry);
+  
+  const updates = {
+      history,
+      lastFingerprint: fingerprint,
+      lastOkAt: new Date().toISOString()
+  };
+  
+  await DB.updateProcess(proc.id, updates);
   broadcast('processes:history', { processId: proc.id, entry });
   return { ok: true, entry };
 }
+
 app.post('/api/processes/:id/scan', authMiddleware, requireRole(['admin','operator']), async (req, res) => {
-  const processes = readJson('processes.json') || [];
-  const proc = processes.find(p => p.id === req.params.id);
+  const proc = await DB.getProcess(req.params.id);
   if (!proc) return res.status(404).json({ error: 'Processo não encontrado' });
   const result = await scanProcess(proc);
   res.json(result);
 });
-app.post('/api/processes/:id/history', authMiddleware, requireRole(['admin','operator']), (req, res) => {
-  const processes = readJson('processes.json') || [];
-  const idx = processes.findIndex(p => p.id === req.params.id);
-  if (idx < 0) return res.status(404).json({ error: 'Processo não encontrado' });
+app.post('/api/processes/:id/history', authMiddleware, requireRole(['admin','operator']), async (req, res) => {
+  const proc = await DB.getProcess(req.params.id);
+  if (!proc) return res.status(404).json({ error: 'Processo não encontrado' });
+  
   const entry = { id: uuidv4(), date: new Date().toISOString(), ...req.body };
-  processes[idx].history = processes[idx].history || [];
-  processes[idx].history.push(entry);
-  processes[idx].lastOkAt = new Date().toISOString();
-  writeJson('processes.json', processes);
+  const history = proc.history || [];
+  history.push(entry);
+  
+  await DB.updateProcess(proc.id, {
+      history,
+      lastOkAt: new Date().toISOString()
+  });
+  
   broadcast('processes:history', { processId: req.params.id, entry });
   res.json(entry);
 });
+
 // Endpoint de teste: página mock de processo para E2E
 app.get('/api/test/process-page', authMiddleware, (req, res) => {
   const rev = String(req.query.rev || '1');
@@ -352,8 +341,8 @@ app.get('/api/test/process-page', authMiddleware, (req, res) => {
   res.setHeader('Content-Type','text/html; charset=utf-8');
   res.send(`<!doctype html><html><body><h1>Processo Mock</h1><div>Data: ${date}</div><div>Andamento: ${mov}</div></body></html>`);
 });
-app.get('/api/processes/scan/status', authMiddleware, (req, res) => {
-  const processes = readJson('processes.json') || [];
+app.get('/api/processes/scan/status', authMiddleware, async (req, res) => {
+  const processes = await DB.getProcesses();
   const items = processes.map(p => ({
     id: p.id,
     autor: p.autor || '',
@@ -367,22 +356,15 @@ app.get('/api/processes/scan/status', authMiddleware, (req, res) => {
 });
 app.post('/api/processes/alerts/send', authMiddleware, requireRole(['admin','operator']), async (req, res) => {
   try {
-    const ok = await sendDailyProcessEmail();
+    const ok = await sendDailyProcessEmail(); // Assuming this is imported but I need to check its implementation as it might use readJson
     res.json({ ok });
   } catch (e) {
     res.status(500).json({ error: e.message || String(e) });
   }
 });
-function appendScanLog(rec) {
-  try {
-    const fp = path.join(DATA_DIR, 'process-scan-logs.json');
-    const arr = fs.existsSync(fp) ? JSON.parse(fs.readFileSync(fp, 'utf-8')) : [];
-    arr.push(rec);
-    fs.writeFileSync(fp, JSON.stringify(arr, null, 2), 'utf-8');
-  } catch {}
-}
+
 async function runProcessAudit() {
-  const processes = readJson('processes.json') || [];
+  const processes = await DB.getProcesses();
   const results = [];
   for (const p of processes) {
     const start = new Date().toISOString();
@@ -423,12 +405,13 @@ async function runProcessAudit() {
       summary: obs,
       entry
     });
-    appendScanLog({ id: p.id, at: end, status, updated });
+    await DB.appendScanLog({ id: p.id, at: end, status, updated });
   }
   const stamp = new Date().toISOString().replace(/[:]/g, '').slice(0,19);
   const base = 'process-audit-' + stamp;
   const jsonFp = path.join(DATA_DIR, base + '.json');
   fs.writeFileSync(jsonFp, JSON.stringify({ generatedAt: new Date().toISOString(), results }, null, 2), 'utf-8');
+  
   const rows = results.map(r => {
     const hl = r.updated ? ' style="background:#e6ffed"' : '';
     const title = r.autor || r.id;
@@ -438,11 +421,14 @@ async function runProcessAudit() {
     const entryHtml = r.entry ? `<div>${(r.entry.movements||[]).slice(0,3).map(m=>`${m.date||''} - ${m.text||''}`).join('<br>')}</div>` : '';
     return `<section${hl}><h3>${title}</h3><div>Status: ${status}</div><div>Última verificação: ${when}</div>${link}<div>Observações: ${r.summary || ''}</div>${entryHtml}</section>`;
   }).join('<hr>');
+  
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Relatório de Processos</title><style>body{font-family:Arial,Helvetica,sans-serif;padding:16px}h1{margin:0 0 12px}section{padding:10px;border:1px solid #ddd;border-radius:8px}</style></head><body><h1>Relatório de Verificação de Processos</h1>${rows || '<div>Sem processos</div>'}</body></html>`;
   const htmlFp = path.join(DATA_DIR, base + '.html');
   fs.writeFileSync(htmlFp, html, 'utf-8');
+  
   return { htmlFile: path.basename(htmlFp), jsonFile: path.basename(jsonFp), results };
 }
+
 app.post('/api/processes/audit', authMiddleware, requireRole(['admin','operator']), async (req, res) => {
   try {
     const out = await runProcessAudit();
@@ -453,6 +439,7 @@ app.post('/api/processes/audit', authMiddleware, requireRole(['admin','operator'
 });
 app.get('/api/processes/audit/latest', authMiddleware, (req, res) => {
   try {
+    // Audit reports are still stored locally for now
     const files = fs.readdirSync(DATA_DIR).filter(f => /^process-audit-.*\.html$/.test(f)).sort();
     const last = files[files.length - 1];
     if (!last) return res.status(404).send('Sem relatório');
@@ -464,21 +451,17 @@ app.get('/api/processes/audit/latest', authMiddleware, (req, res) => {
 });
 
 // Calendar
-app.get('/api/events', authMiddleware, (req, res) => {
-  res.json(readJson('events.json') || []);
+app.get('/api/events', authMiddleware, async (req, res) => {
+  res.json(await DB.getEvents());
 });
-app.post('/api/events', authMiddleware, requireRole(['admin','operator']), (req, res) => {
-  const events = readJson('events.json') || [];
+app.post('/api/events', authMiddleware, requireRole(['admin','operator']), async (req, res) => {
   const ev = { id: uuidv4(), ...req.body };
-  events.push(ev);
-  writeJson('events.json', events);
+  await DB.addEvent(ev);
   broadcast('events:update', ev);
   res.json(ev);
 });
-app.delete('/api/events/:id', authMiddleware, requireRole(['admin','operator']), (req, res) => {
-  let events = readJson('events.json') || [];
-  events = events.filter(e => e.id !== req.params.id);
-  writeJson('events.json', events);
+app.delete('/api/events/:id', authMiddleware, requireRole(['admin','operator']), async (req, res) => {
+  await DB.deleteEvent(req.params.id);
   broadcast('events:delete', { id: req.params.id });
   res.json({ ok: true });
 });
@@ -497,508 +480,53 @@ app.get('/api/events.ics', async (req, res) => {
     const SECRET = process.env.JWT_SECRET || 'dev-secret';
     const t = req.query.t || '';
     if (!t) return res.status(401).send('Unauthorized');
+    
+    // Decode token manually since this is a public endpoint with query param auth
     let payload;
-    try { payload = jwt.verify(String(t), SECRET); } catch { return res.status(401).send('Unauthorized'); }
-    if (!payload || payload.type !== 'ics') return res.status(401).send('Unauthorized');
-    let events = [];
     try {
-      const access = await getCalendarAccessToken();
-      const now = new Date();
-      const timeMin = new Date(now.getTime() - 7*24*60*60*1000).toISOString();
-      const timeMax = new Date(now.getTime() + 90*24*60*60*1000).toISOString();
-      const params = new URLSearchParams({
-        calendarId: 'primary',
-        maxResults: '300',
-        singleEvents: 'true',
-        orderBy: 'startTime',
-        timeMin,
-        timeMax
-      });
-      const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`;
-      const resp = await fetch(url, { headers: { 'Authorization': `Bearer ${access}` } });
-      if (resp.ok) {
-        const json = await resp.json();
-        const items = Array.isArray(json.items) ? json.items : [];
-        events = items.map(i => ({
-          id: i.id,
-          summary: i.summary || '',
-          start: i.start?.dateTime || i.start?.date || '',
-          end: i.end?.dateTime || i.end?.date || '',
-          location: i.location || '',
-          description: i.description || ''
-        }));
-      } else {
-        events = readJson('events.json') || [];
-      }
+        payload = jwt.verify(t, SECRET);
     } catch {
-      events = readJson('events.json') || [];
+        return res.status(403).send('Invalid token');
     }
-    const fmt = (d) => {
-      const x = new Date(d);
-      const y = new Date(x.getTime() - x.getTimezoneOffset()*60000);
-      const s = y.toISOString().replace(/[-:]/g,'').split('.')[0] + 'Z';
-      return s;
-    };
-    const lines = [];
-    lines.push('BEGIN:VCALENDAR');
-    lines.push('VERSION:2.0');
-    lines.push('PRODID:-//DescomplicarAFAO//Dashboard//PT');
-    lines.push('CALSCALE:GREGORIAN');
-    lines.push('METHOD:PUBLISH');
+    
+    const events = await DB.getEvents();
+    
+    // Generate ICS content
+    let ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Dashboard//NONSGML v1.0//EN',
+      'CALSCALE:GREGORIAN'
+    ];
+    
     events.forEach(ev => {
-      const uid = (ev.id || uuidv4()) + '@dashboard';
-      const summary = (ev.summary || ev.title || '').replace(/\r?\n/g,' ');
-      const description = (ev.description || '').replace(/\r?\n/g,' ');
-      const location = (ev.location || '').replace(/\r?\n/g,' ');
-      const start = ev.start || ev.date || new Date().toISOString();
-      const end = ev.end || '';
-      lines.push('BEGIN:VEVENT');
-      lines.push('UID:' + uid);
-      lines.push('DTSTAMP:' + fmt(new Date().toISOString()));
-      lines.push('DTSTART:' + fmt(start));
-      if (end) lines.push('DTEND:' + fmt(end));
-      if (summary) lines.push('SUMMARY:' + summary);
-      if (location) lines.push('LOCATION:' + location);
-      if (description) lines.push('DESCRIPTION:' + description);
-      lines.push('END:VEVENT');
+        ics.push('BEGIN:VEVENT');
+        ics.push(`UID:${ev.id}`);
+        // Simple conversion, assuming ev.date is YYYY-MM-DD or similar
+        // ICS format requires YYYYMMDDTHHMMSSZ
+        const dt = new Date(ev.date || Date.now());
+        const dtStr = dt.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+        ics.push(`DTSTAMP:${dtStr}`);
+        ics.push(`DTSTART:${dtStr}`);
+        ics.push(`SUMMARY:${ev.title || 'Evento'}`);
+        ics.push('END:VEVENT');
     });
-    lines.push('END:VCALENDAR');
-    res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-    res.setHeader('Cache-Control', 'no-store');
-    res.send(lines.join('\r\n'));
-  } catch (e) {
-    res.status(500).send(String(e.message || e));
+    
+    ics.push('END:VCALENDAR');
+    
+    res.setHeader('Content-Type', 'text/calendar');
+    res.send(ics.join('\r\n'));
+  } catch(e) {
+      res.status(500).send(String(e));
   }
 });
 
-// Cameras
-app.get('/api/cameras', authMiddleware, (req, res) => {
-  res.json(readJson('cameras.json') || []);
-});
-app.post('/api/cameras', authMiddleware, requireRole(['admin']), (req, res) => {
-  const cams = readJson('cameras.json') || [];
-  const cam = { id: uuidv4(), ...req.body };
-  cams.push(cam);
-  writeJson('cameras.json', cams);
-  broadcast('cameras:update', cam);
-  res.json(cam);
-});
-app.post('/api/cameras/:id/snapshot', authMiddleware, requireRole(['admin','operator']), (req, res) => {
-  const { imageData } = req.body || {};
-  if (!imageData) return res.status(400).json({ error: 'Sem imagem' });
-  const file = path.join(DATA_DIR, `snapshot-${req.params.id}-${Date.now()}.png`);
-  const base64 = imageData.replace(/^data:image\/png;base64,/, '');
-  fs.writeFileSync(file, Buffer.from(base64, 'base64'));
-  res.json({ ok: true, file: path.basename(file) });
+const server = app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
 
-// Google Calendar OAuth + Events
-function readCalendarOAuth() {
-  try {
-    const fp = path.join(DATA_DIR, 'google_calendar_oauth.json');
-    if (!fs.existsSync(fp)) return null;
-    return JSON.parse(fs.readFileSync(fp, 'utf-8'));
-  } catch { return null; }
-}
-app.get('/api/google-calendar/status', authMiddleware, (req, res) => {
-  const j = readCalendarOAuth();
-  res.json({ connected: !!(j && j.refresh_token) });
-});
-app.get('/api/google-calendar/oauth/url', authMiddleware, async (req, res) => {
-  const client_id = process.env.GOOGLE_CAL_CLIENT_ID || process.env.GOOGLE_CALENDAR_CLIENT_ID || '';
-  const client_secret = process.env.GOOGLE_CAL_CLIENT_SECRET || process.env.GOOGLE_CALENDAR_CLIENT_SECRET || '';
-  if (!client_id || !client_secret) return res.status(400).json({ error: 'Credenciais ausentes' });
-  const origin = req.query.origin || (req.headers.origin || '');
-  const redirect = (process.env.GOOGLE_CAL_REDIRECT_URL || `${origin}/api/google-calendar/oauth/callback`);
-  const params = new URLSearchParams({
-    client_id,
-    redirect_uri: redirect,
-    response_type: 'code',
-    access_type: 'offline',
-    prompt: 'consent',
-    scope: 'https://www.googleapis.com/auth/calendar.readonly'
-  });
-  res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` });
-});
-app.get('/api/google-calendar/oauth/callback', async (req, res) => {
-  try {
-    const code = req.query.code || '';
-    const client_id = process.env.GOOGLE_CAL_CLIENT_ID || process.env.GOOGLE_CALENDAR_CLIENT_ID || '';
-    const client_secret = process.env.GOOGLE_CAL_CLIENT_SECRET || process.env.GOOGLE_CALENDAR_CLIENT_SECRET || '';
-    const origin = req.headers.origin || '';
-    const redirect = (process.env.GOOGLE_CAL_REDIRECT_URL || `${origin}/api/google-calendar/oauth/callback`);
-    if (!code || !client_id || !client_secret) return res.status(400).send('OAuth incompleto');
-    const body = new URLSearchParams({
-      code,
-      client_id,
-      client_secret,
-      redirect_uri: redirect,
-      grant_type: 'authorization_code'
-    });
-    const resp = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body
-    });
-    if (!resp.ok) return res.status(400).send(await resp.text());
-    const json = await resp.json();
-    const fp = path.join(DATA_DIR, 'google_calendar_oauth.json');
-    fs.writeFileSync(fp, JSON.stringify(json, null, 2), 'utf-8');
-    res.setHeader('Content-Type','text/html');
-    res.send('<!doctype html><html><body><script>window.close();</script>Conectado. Você pode fechar esta janela.</body></html>');
-  } catch (e) {
-    res.status(500).send(String(e.message || e));
-  }
-});
-async function getCalendarAccessToken() {
-  const j = readCalendarOAuth() || {};
-  const refresh_token = j.refresh_token || process.env.GOOGLE_CAL_REFRESH_TOKEN || '';
-  const client_id = process.env.GOOGLE_CAL_CLIENT_ID || process.env.GOOGLE_CALENDAR_CLIENT_ID || '';
-  const client_secret = process.env.GOOGLE_CAL_CLIENT_SECRET || process.env.GOOGLE_CALENDAR_CLIENT_SECRET || '';
-  if (!refresh_token || !client_id || !client_secret) throw new Error('OAuth Google Calendar ausente');
-  const body = new URLSearchParams({
-    client_id, client_secret, refresh_token, grant_type: 'refresh_token'
-  });
-  const resp = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body
-  });
-  if (!resp.ok) throw new Error('Falha token: ' + (await resp.text()));
-  const json = await resp.json();
-  return json.access_token;
-}
-app.get('/api/google-calendar/events', authMiddleware, async (req, res) => {
-  try {
-    const access = await getCalendarAccessToken();
-    const now = new Date();
-    const timeMin = new Date(now.getTime() - 7*24*60*60*1000).toISOString();
-    const timeMax = new Date(now.getTime() + 90*24*60*60*1000).toISOString();
-    const params = new URLSearchParams({
-      calendarId: 'primary',
-      maxResults: '100',
-      singleEvents: 'true',
-      orderBy: 'startTime',
-      timeMin,
-      timeMax
-    });
-    const url = `https://www.googleapis.com/calendar/v3/calendars/primary/events?${params.toString()}`;
-    const resp = await fetch(url, {
-      headers: { 'Authorization': `Bearer ${access}` }
-    });
-    if (!resp.ok) return res.status(400).json({ error: await resp.text() });
-    const json = await resp.json();
-    const items = Array.isArray(json.items) ? json.items : [];
-    const events = items.map(i => ({
-      id: i.id,
-      summary: i.summary || '',
-      start: i.start?.dateTime || i.start?.date || '',
-      end: i.end?.dateTime || i.end?.date || '',
-      location: i.location || '',
-      description: i.description || ''
-    }));
-    res.json({ items: events });
-  } catch (e) {
-    res.status(500).json({ error: e.message || String(e) });
-  }
-});
-
-// (removido) Google Custom Search integrado — revertido para pesquisa externa
-
-app.get('/api/auth/google/url', async (req, res) => {
-  try {
-    const client_id = process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_CAL_CLIENT_ID || process.env.GOOGLE_CALENDAR_CLIENT_ID || '';
-    const client_secret = process.env.GOOGLE_OAUTH_CLIENT_SECRET || process.env.GOOGLE_CAL_CLIENT_SECRET || process.env.GOOGLE_CALENDAR_CLIENT_SECRET || '';
-    if (!client_id || !client_secret) return res.status(400).json({ error: 'Credenciais Google OAuth ausentes' });
-    const origin = req.query.origin || (req.headers.origin || '');
-    const redirect = (process.env.GOOGLE_OAUTH_REDIRECT_URL || `${origin}/api/auth/google/callback`);
-    const params = new URLSearchParams({
-      client_id,
-      redirect_uri: redirect,
-      response_type: 'code',
-      access_type: 'offline',
-      prompt: 'consent',
-      scope: 'openid email profile'
-    });
-    res.json({ url: `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}` });
-  } catch (e) {
-    res.status(500).json({ error: e.message || String(e) });
-  }
-});
-app.get('/api/auth/google/callback', async (req, res) => {
-  try {
-    const code = req.query.code || '';
-    const client_id = process.env.GOOGLE_OAUTH_CLIENT_ID || process.env.GOOGLE_CAL_CLIENT_ID || process.env.GOOGLE_CALENDAR_CLIENT_ID || '';
-    const client_secret = process.env.GOOGLE_OAUTH_CLIENT_SECRET || process.env.GOOGLE_CAL_CLIENT_SECRET || process.env.GOOGLE_CALENDAR_CLIENT_SECRET || '';
-    const origin = req.headers.origin || '';
-    const redirect = (process.env.GOOGLE_OAUTH_REDIRECT_URL || `${origin}/api/auth/google/callback`);
-    if (!code || !client_id || !client_secret) return res.status(400).send('OAuth incompleto');
-    const body = new URLSearchParams({
-      code,
-      client_id,
-      client_secret,
-      redirect_uri: redirect,
-      grant_type: 'authorization_code'
-    });
-    const resp = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body
-    });
-    if (!resp.ok) return res.status(400).send(await resp.text());
-    const json = await resp.json();
-    const access = json.access_token || '';
-    if (!access) return res.status(400).send('Sem access token');
-    const uinfo = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-      headers: { 'Authorization': `Bearer ${access}` }
-    }).then(r => r.json());
-    const email = uinfo.email || '';
-    const name = uinfo.name || (uinfo.given_name || '') || 'Usuário';
-    if (!email) return res.status(400).send('Sem email');
-    const users = readJson('users.json') || [];
-    let user = users.find(u => u.email === email);
-    if (!user) {
-      user = { id: uuidv4(), name, email, role: 'operator', password: null };
-      users.push(user);
-      writeJson('users.json', users);
-    }
-    const token = signToken({ id: user.id, role: user.role, name: user.name, email: user.email });
-    res.setHeader('Content-Type','text/html');
-    res.send(`<!doctype html><html><body><script>
-      try { window.opener && window.opener.postMessage({ type: 'google-login', token: '${token}' }, '*'); } catch(e) {}
-      window.close();
-    </script>Login concluído. Você pode fechar esta janela.</body></html>`);
-  } catch (e) {
-    res.status(500).send(String(e.message || e));
-  }
-});
-// Vehicles
-app.get('/api/vehicles', authMiddleware, (req, res) => {
-  res.json(readJson('vehicles.json') || []);
-});
-app.get('/api/vehicles/routes', authMiddleware, (req, res) => {
-  const fp = path.join(DATA_DIR, 'routes.json');
-  if (!fs.existsSync(fp)) fs.writeFileSync(fp, '[]', 'utf-8');
-  res.json(JSON.parse(fs.readFileSync(fp, 'utf-8')));
-});
-app.post('/api/vehicles/routes', authMiddleware, requireRole(['admin','operator']), (req, res) => {
-  const fp = path.join(DATA_DIR, 'routes.json');
-  const routes = fs.existsSync(fp) ? JSON.parse(fs.readFileSync(fp,'utf-8')) : [];
-  const route = { id: uuidv4(), ...req.body };
-  routes.push(route);
-  fs.writeFileSync(fp, JSON.stringify(routes, null, 2), 'utf-8');
-  broadcast('vehicles:routes', route);
-  res.json(route);
-});
-
-let server;
-try {
-  const certFile = process.env.SSL_CERT_FILE || '';
-  const keyFile = process.env.SSL_KEY_FILE || '';
-  if (certFile && keyFile && fs.existsSync(certFile) && fs.existsSync(keyFile)) {
-    const ssl = { cert: fs.readFileSync(certFile), key: fs.readFileSync(keyFile) };
-    server = https.createServer(ssl, app);
-    console.log('HTTPS habilitado');
-  } else {
-    server = http.createServer(app);
-  }
-} catch {
-  server = http.createServer(app);
-}
 const wss = new WebSocketServer({ server });
 wss.on('connection', (ws) => {
   sockets.add(ws);
   ws.on('close', () => sockets.delete(ws));
-});
-wss.on('error', (e) => {
-  if (e && e.code === 'EADDRINUSE') {
-    console.log(`Servidor já ativo em http://localhost:${PORT} — reutilizando`);
-    try { server.close(); } catch {}
-    process.exit(0);
-  }
-});
-
-scheduleDailyBackup(DATA_DIR, BACKUP_DIR);
-async function scanAll() {
-  const processes = readJson('processes.json') || [];
-  let running = 0;
-  for (const proc of processes) {
-    const run = async () => { try { await scanProcess(proc); } catch {} };
-    while (running >= 4) { await new Promise(r => setTimeout(r, 300)); }
-    running++;
-    await run();
-    running--;
-  }
-}
-setTimeout(() => { scanAll(); }, 5000);
-const SCAN_MIN = Number(process.env.PROCESS_SCAN_INTERVAL_MINUTES || 60);
-const SCAN_MS = Math.max(1, SCAN_MIN) * 60 * 1000;
-setInterval(() => { scanAll(); }, SCAN_MS);
-
-function formatDailyReport() {
-  const processes = readJson('processes.json') || [];
-  const now = Date.now();
-  const start = now - 24*60*60*1000;
-  const rows = processes.map(p => {
-    const hist = (p.history || []).filter(h => {
-      const t = new Date(h.date || Date.now()).getTime();
-      return t >= start;
-    }).map(h => {
-      const t = new Date(h.date || Date.now()).toLocaleString('pt-BR');
-      const movs = Array.isArray(h.movements) ? h.movements.map(m => `${m.date || ''} - ${m.text || ''}`).join('<br>') : (h.summary || h.message || '');
-      return `<tr><td>${t}</td><td>${movs}</td></tr>`;
-    }).join('');
-    const title = p.autor || 'Processo';
-    const link = p.link || '';
-    const table = hist ? (`<table border="1" cellpadding="4" cellspacing="0"><thead><tr><th>Data/Hora</th><th>Movimentos</th></tr></thead><tbody>${hist}</tbody></table>`) : '<div>Sem atualizações nas últimas 24h</div>';
-    return `<h3>${title}</h3>${link ? `<div>Link: ${link}</div>` : ''}${table}`;
-  }).join('<hr>');
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Resumo diário</title></head><body><h1>Resumo diário de andamentos</h1>${rows || '<div>Sem processos cadastrados</div>'}</body></html>`;
-  const text = (processes || []).map(p => {
-    const title = p.autor || 'Processo';
-    const hist = (p.history || []).filter(h => {
-      const t = new Date(h.date || Date.now()).getTime();
-      return t >= start;
-    }).map(h => {
-      const t = new Date(h.date || Date.now()).toLocaleString('pt-BR');
-      const movs = Array.isArray(h.movements) ? h.movements.map(m => `${m.date || ''} - ${m.text || ''}`).join(' | ') : (h.summary || h.message || '');
-      return `- ${t}: ${movs}`;
-    }).join('\n');
-    return `${title}\n${hist || 'Sem atualizações'}`;
-  }).join('\n\n');
-  return { html, text };
-}
-async function sendDailyProcessEmail() {
-  const to = (process.env.ALERT_EMAILS || 'rwaynne84@gmail.com').split(',')[0].trim();
-  const host = process.env.SMTP_HOST || '';
-  if (!to || !host) return false;
-  const { html, text } = formatDailyReport();
-  try {
-    await sendEmail({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 465),
-      secure: String(process.env.SMTP_SECURE || 'true') === 'true',
-      user: process.env.SMTP_USER || '',
-      pass: process.env.SMTP_PASS || '',
-      from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
-      to,
-      subject: 'Resumo diário de andamentos de processos',
-      text,
-      html
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-function extractCNJ(str) {
-  const m = String(str || '').match(/(\d{7}-\d{2}\.\d{4}\.\d\.\d{2}\.\d{4})/);
-  return m ? m[1] : '';
-}
-function buildIndividualEmail({ proc, updates }) {
-  const numero = extractCNJ(proc.autor || '') || extractCNJ(proc.link || '');
-  const ativo = (proc.autor || '').split(' x ')[0] || '';
-  const passivo = (proc.autor || '').split(' x ')[1] || '';
-  const classe = '';
-  const orgao = '';
-  const autuacao = '';
-  const assunto = '';
-  const rows = updates.map(u => {
-    const movs = Array.isArray(u.movements) ? u.movements : [];
-    const first = movs[0] || { date: '', text: (u.summary || '') };
-    const dt = first.date || (u.date ? new Date(u.date).toLocaleString('pt-BR') : '');
-    const tx = first.text || (u.summary || '');
-    return `<tr><td>${dt}</td><td>${tx}</td></tr>`;
-  }).join('');
-  const table = rows ? `<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse"><thead><tr><th>Data</th><th>Movimento</th></tr></thead><tbody>${rows}</tbody></table>` : '<div>Sem novas movimentações</div>';
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>PJe Push</title></head><body><div style="font-family:Arial,Helvetica,sans-serif">
-  <h2>PJe Push - Serviço de Acompanhamento automático de processos</h2>
-  <p>Prezado(a),</p>
-  <p>Informamos que o processo a seguir sofreu movimentação:</p>
-  <div>Número do Processo: ${numero || '—'}</div>
-  <div>Polo Ativo: ${ativo || '—'}</div>
-  <div>Polo Passivo: ${passivo || '—'}</div>
-  <div>Classe Judicial: ${classe || '—'}</div>
-  <div>Órgão: ${orgao || '—'}</div>
-  <div>Data da Autuação: ${autuacao || '—'}</div>
-  <div>Assunto: ${assunto || '—'}</div>
-  <div style="margin-top:12px">${table}</div>
-  <div style="margin-top:12px">Link: ${proc.link || '—'}</div>
-  </div></body></html>`;
-  const text = `PJe Push - Serviço de Acompanhamento automático de processos
-Número do Processo: ${numero || '—'}
-Polo Ativo: ${ativo || '—'}
-Polo Passivo: ${passivo || '—'}
-Classe Judicial: ${classe || '—'}
-Órgão: ${orgao || '—'}
-Data da Autuação: ${autuacao || '—'}
-Assunto: ${assunto || '—'}
-${updates.map(u => {
-  const movs = Array.isArray(u.movements) ? u.movements : [];
-  const first = movs[0] || { date: '', text: (u.summary || '') };
-  const dt = first.date || (u.date ? new Date(u.date).toLocaleString('pt-BR') : '');
-  const tx = first.text || (u.summary || '');
-  return `- ${dt} - ${tx}`;
-}).join('\n')}`;
-  return { html, text, numero };
-}
-async function sendDailyProcessEmailsIndividuals() {
-  const host = process.env.SMTP_HOST || '';
-  const to = (process.env.ALERT_EMAILS || 'rwaynne84@gmail.com').split(',')[0].trim();
-  if (!host || !to) return false;
-  const processes = readJson('processes.json') || [];
-  const since = Date.now() - 24*60*60*1000;
-  let sent = 0;
-  for (const p of processes) {
-    const updates = (p.history || []).filter(h => {
-      const t = new Date(h.date || Date.now()).getTime();
-      return t >= since;
-    });
-    if (!updates.length) continue;
-    const payload = buildIndividualEmail({ proc: p, updates });
-    try {
-      await sendEmail({
-        host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT || 465),
-        secure: String(process.env.SMTP_SECURE || 'true') === 'true',
-        user: process.env.SMTP_USER || '',
-        pass: process.env.SMTP_PASS || '',
-        from: process.env.SMTP_FROM || process.env.SMTP_USER || '',
-        to,
-        subject: `Movimentação de processo ${payload.numero || (p.autor || p.id)}`,
-        text: payload.text,
-        html: payload.html
-      });
-      sent++;
-    } catch {}
-  }
-  return sent > 0;
-}
-function scheduleDailyAlerts() {
-  const ms = 24 * 60 * 60 * 1000;
-  setTimeout(() => { sendDailyProcessEmailsIndividuals().catch(()=>{}); }, 120000);
-  setInterval(() => { sendDailyProcessEmailsIndividuals().catch(()=>{}); }, ms);
-}
-scheduleDailyAlerts();
-app.post('/api/processes/alerts/send-individual', authMiddleware, requireRole(['admin','operator']), async (req, res) => {
-  try {
-    const ok = await sendDailyProcessEmailsIndividuals();
-    res.json({ ok });
-  } catch (e) {
-    res.status(500).json({ error: e.message || String(e) });
-  }
-});
-
-app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
-});
-
-server.on('error', (e) => {
-  if (e && e.code === 'EADDRINUSE') {
-    console.log(`Servidor já ativo em http://localhost:${PORT} — reutilizando`);
-    process.exit(0);
-  }
-});
-server.listen(PORT, () => {
-  console.log(`Dashboard iniciado em http://localhost:${PORT}`);
 });

@@ -1,6 +1,7 @@
 node_modules/
 server/backups/
 server/data/
+service-account-key.json
 .env
 .env.*
 dist/

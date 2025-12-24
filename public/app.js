@@ -703,8 +703,8 @@ function createProcWidget(entry) {
     }
   };
   updateOpen();
-  linkInp.oninput = updateOpen;
-  saveBtn.onclick = () => {
+  
+  const saveProcess = () => {
     const u = linkInp.value.trim();
     const a = autor.value.trim();
     if (u && !validUrl(u)) {
@@ -723,10 +723,27 @@ function createProcWidget(entry) {
     const label = a ? 'Processo: ' + a : 'Processo';
     if (side) side.textContent = label;
     if (tab) tab.textContent = label;
-    setStatus(true, 'Dados salvos');
+    setStatus(true, 'Salvo automaticamente');
     renderProcessMonitor(entry.id);
     renderProcList();
   };
+
+  let debounceTimer;
+  const onInput = () => {
+    setStatus(false, 'Salvando...');
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(saveProcess, 1000);
+  };
+
+  linkInp.oninput = () => {
+    updateOpen();
+    onInput();
+  };
+  autor.oninput = onInput;
+
+  saveBtn.onclick = saveProcess;
+  saveBtn.style.display = 'none'; // Hide manual save button since we have auto-save
+
   openScreenBtn.onclick = () => { openProcessScreen(entry.id); };
   return w;
 }
