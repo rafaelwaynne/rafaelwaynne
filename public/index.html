@@ -4,6 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Painel Operacional</title>
+    <meta name="theme-color" content="#0b5fff">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icons/dr-rafao.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -11,7 +14,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.css" rel="stylesheet" />
     <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -20,7 +22,16 @@
     <header class="topbar">
       <button id="menu-toggle" class="menu-btn">☰</button>
       <div class="brand">Painel Operacional</div>
+      <a id="quick-processes" href="#" class="jus-link">Acesso Rápido: Processos</a>
+      <div class="topbar-search">
+        <input id="google-search-input" type="text" placeholder="Pesquisar no Google">
+        <button id="google-search-btn" class="add-btn">Pesquisar</button>
+      </div>
       <div class="spacer"></div>
+      <div class="refresh-area">
+        <button id="refresh-btn" class="add-btn">Atualizar</button>
+        <span id="last-update" class="last-update"></span>
+      </div>
       <div class="user-area">
         <span id="user-info"></span>
         <button id="logout-btn">Sair</button>
@@ -33,6 +44,7 @@
         <input id="email" placeholder="Email" value="admin@local">
         <input id="password" type="password" placeholder="Senha" value="admin123">
         <button id="login-btn">Entrar</button>
+        <button id="google-login-btn" class="add-btn">Entrar com Google</button>
         <div class="error" id="login-error"></div>
       </div>
     </div>
@@ -41,122 +53,31 @@
       <div class="layout">
         <aside class="sidebar" id="sidebar">
           <div class="sidebar-title">Navegação</div>
-          <button class="sidebar-item" data-target="billing">Faturamento</button>
-          <button class="sidebar-item" data-target="processes">Processos</button>
-          <button class="sidebar-item" data-target="calendar">Agenda</button>
-          <button class="sidebar-item" data-target="cameras">Câmeras</button>
-          <button class="sidebar-item" data-target="vehicles">Veículos</button>
+          <button class="sidebar-item" id="side-processes" data-target="processes" aria-controls="panel-processes" aria-selected="false">Processos</button>
+          <button class="sidebar-item" id="side-calendar" data-target="calendar" aria-controls="panel-calendar" aria-selected="false">Agenda</button>
+          <button class="sidebar-item" id="side-vehicles" data-target="vehicles" aria-controls="panel-vehicles" aria-selected="false">Veículos</button>
+          <button class="sidebar-item" id="side-google" data-target="google" aria-controls="panel-google" aria-selected="false">Google</button>
+          <button class="sidebar-item" id="side-google-ads" data-target="google-ads" aria-controls="panel-google-ads" aria-selected="false">Google Ads</button>
+          <button class="sidebar-item" id="side-trash" data-target="trash" aria-controls="panel-trash" aria-selected="false">Lixeira</button>
         </aside>
         <div class="content">
-          <nav class="tabs">
-            <button data-tab="billing">Faturamento</button>
-            <button data-tab="processes">Processos</button>
-            <button data-tab="calendar">Agenda</button>
-            <button data-tab="cameras">Câmeras</button>
-            <button data-tab="vehicles">Veículos</button>
-          </nav>
-          <section class="dashboard" id="dashboard">
-        <div class="widget" data-id="billing" draggable="true">
-          <div class="widget-head">
-            <span>Faturamento</span>
-            <div class="actions">
-              <button id="export-csv">Exportar Excel (CSV)</button>
-              <button id="export-pdf">Exportar PDF</button>
-            </div>
+          <div id="panels" class="content-panels" role="region" aria-live="polite">
+            <section id="panel-processes" class="panel" role="region" aria-label="Processos"></section>
+            <section id="panel-calendar" class="panel" role="region" aria-label="Agenda"></section>
+            <section id="panel-vehicles" class="panel" role="region" aria-label="Veículos"></section>
+            <section id="panel-google" class="panel" role="region" aria-label="Google"></section>
+            <section id="panel-google-ads" class="panel" role="region" aria-label="Google Ads"></section>
+            <section id="panel-trash" class="panel" role="region" aria-label="Lixeira"></section>
           </div>
-          <div class="widget-body">
-           <div class="filters">
-              <select id="filter-store"></select>
-              <select id="filter-status">
-                <option value="">Status</option>
-                <option value="pago">Pago</option>
-                <option value="pendente">Pendente</option>
-              </select>
-              <input id="filter-min" type="number" placeholder="Valor mín">
-              <input id="filter-max" type="number" placeholder="Valor máx">
-              <input id="filter-start" type="date">
-              <input id="filter-end" type="date">
-              <button id="apply-filters">Aplicar</button>
-            </div>
-            <div class="filters">
-              <input id="new-invoice-store" placeholder="Loja">
-              <input id="new-invoice-amount" type="number" placeholder="Valor">
-              <input id="new-invoice-date" type="date">
-              <select id="new-invoice-status">
-                <option value="pendente">Pendente</option>
-                <option value="pago">Pago</option>
-              </select>
-              <button id="create-invoice">Nova fatura</button>
-              <button id="firebase-load">Carregar do Firebase</button>
-              <button id="firebase-save">Salvar no Firebase</button>
-            </div>
-            <table id="billing-table"></table>
-            <canvas id="billing-chart"></canvas>
-          </div>
-        </div>
-
-        <div class="widget" data-id="processes" draggable="true">
-          <div class="widget-head"><span>Processos</span></div>
-          <div class="widget-body">
-            <div class="filters">
-              <input id="new-proc-name" placeholder="Nome">
-              <select id="new-proc-status">
-                <option value="em_andamento">Em andamento</option>
-                <option value="concluido">Concluído</option>
-              </select>
-              <input id="new-proc-owner" placeholder="Responsável">
-              <input id="new-proc-deadline" type="date">
-              <button id="create-proc">Adicionar</button>
-            </div>
-            <table id="processes-table"></table>
-          </div>
-        </div>
-
-        <div class="widget" data-id="calendar" draggable="true">
-          <div class="widget-head"><span>Agenda</span></div>
-          <div class="widget-body">
-            <div class="filters">
-              <input id="new-ev-title" placeholder="Título">
-              <input id="new-ev-start" type="datetime-local">
-              <input id="new-ev-end" type="datetime-local">
-              <label><input id="new-ev-recurring" type="checkbox"> Recorrente semanal</label>
-              <button id="create-event">Adicionar</button>
-            </div>
-            <div id="calendar"></div>
-          </div>
-        </div>
-
-        <div class="widget" data-id="cameras" draggable="true">
-          <div class="widget-head">
-            <span>Câmeras</span>
-            <div class="actions">
-              <select id="camera-layout">
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4" selected>4</option>
-              </select>
-            </div>
-          </div>
-          <div class="widget-body">
-            <div id="camera-grid" class="camera-grid"></div>
-          </div>
-        </div>
-
-        <div class="widget" data-id="vehicles" draggable="true">
-          <div class="widget-head"><span>Veículos</span></div>
-          <div class="widget-body">
-            <div id="map" class="map"></div>
-            <div class="route-controls">
-              <button id="simulate-route">Simular rota</button>
-            </div>
-          </div>
-        </div>
-          </section>
         </div>
       </div>
     </main>
 
     <script src="/app.js"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js').catch(()=>{});
+      }
+    </script>
   </body>
   </html>

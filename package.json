@@ -5,17 +5,24 @@
   "description": "Painel de controle operacional diário com faturamento, processos, agenda, câmeras e rastreamento",
   "main": "server/index.js",
   "scripts": {
-    "dev": "node server/index.js",
-    "start": "node server/index.js",
+    "dev": "set PORT=3000 && node server/index.js",
+    "start": "set PORT=3000 && node server/index.js",
     "lint": "echo \"No lint configured\"",
-    "typecheck": "echo \"No typecheck configured\""
+    "typecheck": "echo \"No typecheck configured\"",
+    "test:e2e": "npx playwright test"
   },
   "dependencies": {
+    "@google-analytics/data": "^5.2.1",
+    "google-ads-api": "*",
+    "date-fns": "^3.6.0",
+    "dotenv": "^16.4.5",
     "express": "^4.19.2",
-    "ws": "^8.18.0",
     "jsonwebtoken": "^9.0.2",
     "uuid": "^9.0.1",
-    "date-fns": "^3.6.0",
-    "dotenv": "^16.4.5"
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.57.0",
+    "@playwright/test": "^1.57.0"
   }
 }

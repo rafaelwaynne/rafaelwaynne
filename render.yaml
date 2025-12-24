@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: dr-rafao
+    env: node
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server/index.js
+    autoDeploy: true
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: 18
+      - key: FORCE_HTTPS
+        value: true

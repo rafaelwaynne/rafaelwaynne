@@ -1,0 +1,26 @@
+{
+  "name": "Dr Rafão",
+  "short_name": "Dr Rafão",
+  "description": "Acesso direto à página do Dr Rafão",
+  "id": "https://dr-rafao.onrender.com/",
+  "start_url": "https://dr-rafao.onrender.com/?dr-rafao",
+  "scope": "https://dr-rafao.onrender.com/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0b5fff",
+  "icons": [
+    {
+      "src": "/icons/dr-rafao.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dr Rafão",
+      "url": "/?dr-rafao",
+      "description": "Abrir página principal do Dr Rafão"
+    }
+  ]
+}

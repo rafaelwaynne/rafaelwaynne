@@ -1,0 +1,76 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - button "☰" [ref=e3] [cursor=pointer]
+    - generic [ref=e4]: Painel Operacional
+    - 'link "Acesso Rápido: Processos" [ref=e5] [cursor=pointer]':
+      - /url: "#"
+    - generic [ref=e6]:
+      - text: Admin (admin)
+      - button "Sair" [ref=e7] [cursor=pointer]
+  - main [ref=e8]:
+    - generic [ref=e9]:
+      - complementary [ref=e10]:
+        - generic [ref=e11]: Navegação
+        - button "Processos" [ref=e12] [cursor=pointer]
+        - button "Agenda" [ref=e13] [cursor=pointer]
+        - button "Veículos" [ref=e14] [cursor=pointer]
+        - button "Google" [ref=e15] [cursor=pointer]
+        - button "Google Ads" [ref=e16] [cursor=pointer]
+      - region [ref=e18]:
+        - region "Processos" [ref=e19]:
+          - generic [ref=e20]:
+            - generic [ref=e21]:
+              - text: novo Processo
+              - button "Adicionar processo" [ref=e22] [cursor=pointer]: +
+            - list [ref=e24]:
+              - listitem [ref=e25]:
+                - button "Marcar processo" [ref=e26] [cursor=pointer]
+                - generic [ref=e27]: Fabianne Fliess Rangel x Fast Shop S.A
+                - button "Status" [ref=e28] [cursor=pointer]: EM ANDAMENTO
+                - link "Abrir" [ref=e29] [cursor=pointer]:
+                  - /url: https://www.jusbrasil.com.br/processos/904606850/processo-n-010XXXX-8820255010049-do-trt1/?query_id=3db50c71-ed03-4145-8ad2-f832be8e28d1
+                - button "Verificar agora" [ref=e30] [cursor=pointer]
+                - button "Excluir processo" [ref=e31] [cursor=pointer]: Excluir
+              - listitem [ref=e32]:
+                - button "Marcar processo" [ref=e33] [cursor=pointer]
+                - generic [ref=e34]: leandro lider 0101664-43.2025.5.01.0035
+                - button "Status" [ref=e35] [cursor=pointer]: EM ANDAMENTO
+                - generic: Abrir
+                - button "Verificar agora" [ref=e36] [cursor=pointer]
+                - button "Excluir processo" [ref=e37] [cursor=pointer]: Excluir
+              - listitem [ref=e38]:
+                - button "Marcar processo" [ref=e39] [cursor=pointer]
+                - generic [ref=e40]: Rafael Waynne Barreto Ferreira x TIM S/A
+                - button "Status" [ref=e41] [cursor=pointer]: EM ANDAMENTO
+                - link "Abrir" [ref=e42] [cursor=pointer]:
+                  - /url: https://www.jusbrasil.com.br/processos/903249655/processo-n-082XXXX-9520258190205-do-tjrj/?query_id=262f039b-833e-4bc9-b4f0-7e983e83f0c9
+                - button "Verificar agora" [ref=e43] [cursor=pointer]
+                - button "Excluir processo" [ref=e44] [cursor=pointer]: Excluir
+              - listitem [ref=e45]:
+                - button "Marcar processo" [ref=e46] [cursor=pointer]
+                - generic [ref=e47]: Rodrigo de Andrade dos Santos x Fundo de Investimento Em Direitos Creditorios Multsegmentos NPL Ipanema
+                - button "Status" [ref=e48] [cursor=pointer]: EM ANDAMENTO
+                - link "Abrir" [ref=e49] [cursor=pointer]:
+                  - /url: https://www.jusbrasil.com.br/processos/904495939/processo-n-082XXXX-9320258190205-do-tjrj/?query_id=4271de3e-78c8-4c2b-908f-fe3cccb8023c
+                - button "Verificar agora" [ref=e50] [cursor=pointer]
+                - button "Excluir processo" [ref=e51] [cursor=pointer]: Excluir
+              - listitem [ref=e52]:
+                - button "Marcar processo" [ref=e53] [cursor=pointer]
+                - generic [ref=e54]: RR Comercio de Baterias Automotivas LTDA x Amazon Servicos de Varejo do Brasil Ltda.
+                - button "Status" [ref=e55] [cursor=pointer]: EM ANDAMENTO
+                - link "Abrir" [ref=e56] [cursor=pointer]:
+                  - /url: https://www.jusbrasil.com.br/processos/903432306/processo-n-082XXXX-1420258190206-do-tjrj/?query_id=df10d6d4-bf5a-448f-93fd-0fea2b808ecf
+                - button "Verificar agora" [ref=e57] [cursor=pointer]
+                - button "Excluir processo" [ref=e58] [cursor=pointer]: Excluir
+              - listitem [ref=e59]:
+                - button "Marcar processo" [ref=e60] [cursor=pointer]
+                - generic [ref=e61]: RR Comercio de Baterias Automotivas LTDA x Bradesco Saude S/A
+                - button "Status" [ref=e62] [cursor=pointer]: EM ANDAMENTO
+                - link "Abrir" [ref=e63] [cursor=pointer]:
+                  - /url: https://www.jusbrasil.com.br/processos/895262513/processo-n-081XXXX-8220258190206-do-tjrj/?query_id=0d6e8725-3535-443a-8618-aa1b8d8f411a
+                - button "Verificar agora" [ref=e64] [cursor=pointer]
+                - button "Excluir processo" [ref=e65] [cursor=pointer]: Excluir
+```
