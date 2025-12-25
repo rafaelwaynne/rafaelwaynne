@@ -5,11 +5,14 @@
   "description": "Painel de controle operacional diário com faturamento, processos, agenda, câmeras e rastreamento",
   "main": "server/index.js",
   "scripts": {
-    "dev": "set PORT=3000 && node server/index.js",
-    "start": "set PORT=3000 && node server/index.js",
+    "dev": "node server/index.js",
+    "start": "node server/index.js",
     "lint": "echo \"No lint configured\"",
     "typecheck": "echo \"No typecheck configured\"",
     "test:e2e": "npx playwright test"
+  },
+  "engines": {
+    "node": "18"
   },
   "dependencies": {
     "@google-analytics/data": "^5.2.1",
