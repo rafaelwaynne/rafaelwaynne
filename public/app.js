@@ -146,8 +146,6 @@ async function bootApp() {
   initSidebar();
   initQuickAccess();
   await initFirebase();
-  await loadGoogle();
-  await loadGoogleAds();
   initTopbarSearch();
   initRefresh();
   const firstPanel = document.getElementById('panel-processes');
@@ -261,11 +259,7 @@ function refreshAll() {
     loadLayout().catch(()=>{}),
     loadBilling().catch(()=>{}),
     loadProcesses().then(()=>renderProcList()).catch(()=>{}),
-    loadCalendar().catch(()=>{}),
-    loadCameras().catch(()=>{}),
-    loadVehicles().catch(()=>{}),
-    loadGoogle().catch(()=>{}),
-    loadGoogleAds().catch(()=>{})
+    loadCameras().catch(()=>{})
   ];
   return Promise.all(ops);
 }
