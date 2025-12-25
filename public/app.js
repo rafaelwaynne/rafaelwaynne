@@ -913,10 +913,14 @@ function renderProcList() {
         const saveBtn = document.createElement('button');
         saveBtn.textContent = 'Salvar';
         saveBtn.className = 'add-btn';
-        const cancelBtn = document.createElement('button');
-        cancelBtn.textContent = 'Cancelar';
-        cancelBtn.className = 'add-btn';
-        saveBtn.onclick = () => {
+        saveBtn.style.display = 'none'; // Auto-save enabled
+        
+        const statusSpan = document.createElement('span');
+        statusSpan.className = 'status-msg';
+        statusSpan.style.marginLeft = '10px';
+        statusSpan.style.fontSize = '0.8rem';
+
+        const performSave = () => {
           const a = nameInp.value.trim();
           const u = linkInp.value.trim();
           const idx = list.findIndex(x => x.id === id);
@@ -924,11 +928,44 @@ function renderProcList() {
           if (idx >= 0) list[idx] = next;
           else list.push(next);
           setProcTabs(list);
-          api('/api/processes/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify({ autor: a, link: u, status: next.status }) }).catch(()=>{});
-          renderProcList();
+          statusSpan.textContent = 'Salvando...';
+          statusSpan.style.color = '#fbbf24';
+          api('/api/processes/' + encodeURIComponent(id), { method: 'PUT', body: JSON.stringify({ autor: a, link: u, status: next.status }) })
+            .then(() => {
+              statusSpan.textContent = 'Salvo';
+              statusSpan.style.color = '#22c55e';
+              setTimeout(() => { statusSpan.textContent = ''; }, 2000);
+            })
+            .catch(() => {
+              statusSpan.textContent = 'Erro ao salvar';
+              statusSpan.style.color = '#ef4444';
+            });
+          // Update list UI partially if needed, but full render would close editor
+          // So we just keep editor open
         };
-        cancelBtn.onclick = () => { editor.remove(); };
-        editor.append(nameInp, linkInp, openA, saveBtn, cancelBtn);
+
+        let deb;
+        const onEditInput = () => {
+          statusSpan.textContent = 'Digitando...';
+          statusSpan.style.color = '#9ca3af';
+          clearTimeout(deb);
+          deb = setTimeout(performSave, 500);
+        };
+
+        nameInp.oninput = onEditInput;
+        linkInp.oninput = () => {
+          updateOpen();
+          onEditInput();
+        };
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Fechar'; // Changed from Cancelar since it saves automatically
+        cancelBtn.className = 'add-btn';
+        
+        saveBtn.onclick = () => { performSave(); renderProcList(); }; // Manual save triggers render
+        cancelBtn.onclick = () => { renderProcList(); }; // Just close/re-render
+
+        editor.append(nameInp, linkInp, openA, saveBtn, cancelBtn, statusSpan);
         li.append(editor);
         return;
       }
