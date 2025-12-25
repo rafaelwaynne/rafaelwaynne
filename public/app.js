@@ -50,6 +50,14 @@ function connectWS() {
     if (event === 'googleads:update') renderGoogleAds(payload);
     if (event === 'googleads:alert') renderGoogleAdsAlerts(payload);
   };
+  ws.onclose = () => {
+    console.log('WS desconectado. Reconectando em 5s...');
+    setTimeout(connectWS, 5000);
+  };
+  ws.onerror = (err) => {
+    console.error('Erro no WS:', err);
+    ws.close();
+  };
 }
 
 function initAuthUI() {
@@ -512,6 +520,8 @@ function renderBillingChart(invoices) {
   });
 }
 
+let lastRenderedProcs = '';
+
 // Processes
 async function loadProcesses() {
   const procs = await api('/api/processes').catch(()=>[]);
@@ -535,7 +545,14 @@ async function loadProcesses() {
   if (next.length && JSON.stringify(next) !== JSON.stringify(local)) {
     setProcTabs(next);
   }
-  renderProcList();
+  
+  // Smart Cache: Só renderiza se houver mudanças nos dados
+  const currentDataStr = JSON.stringify({ p: state.processes, t: next });
+  if (currentDataStr !== lastRenderedProcs) {
+    lastRenderedProcs = currentDataStr;
+    renderProcList();
+  }
+  
   const numView = document.getElementById('pje-numero-processo-view');
   const link = document.getElementById('pje-open-jus');
   const params = new URLSearchParams(location.search);
