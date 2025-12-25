@@ -272,16 +272,43 @@ function refreshAll() {
 function initRefresh() {
   const btn = document.getElementById('refresh-btn');
   const last = document.getElementById('last-update');
+  const clock = document.getElementById('realtime-clock');
+  
+  // 2. Relógio em tempo real
+  const updateClock = () => {
+    if (clock) {
+      clock.textContent = new Date().toLocaleTimeString('pt-BR');
+    }
+  };
+  setInterval(updateClock, 1000);
+  updateClock();
+
   if (!btn) return;
   const setNow = () => { if (last) last.textContent = new Date().toLocaleString('pt-BR'); };
+  
+  // Atualização manual
   btn.onclick = async () => {
     const prev = btn.textContent;
     btn.textContent = 'Atualizando...';
     btn.disabled = true;
     try { await refreshAll(); setNow(); } finally { btn.textContent = prev; btn.disabled = false; }
   };
+  
   setNow();
-  setInterval(() => { btn.click(); }, 10 * 60 * 1000);
+  
+  // 1. Atualização constante do sistema (Polling 60s)
+  setInterval(async () => { 
+    // Indicador visual discreto durante atualização automática (Azul Claro)
+    if (clock) clock.style.color = '#60A5FA'; 
+    try {
+      await refreshAll();
+      setNow();
+    } catch (e) {
+      console.error('Erro na atualização automática:', e);
+    } finally {
+      if (clock) clock.style.color = ''; // Restaura cor original
+    }
+  }, 60 * 1000);
 }
 function initTopbarSearch() {
   const inp = document.getElementById('google-search-input');
@@ -549,6 +576,12 @@ async function loadProcesses() {
   // Smart Cache: Só renderiza se houver mudanças nos dados
   const currentDataStr = JSON.stringify({ p: state.processes, t: next });
   if (currentDataStr !== lastRenderedProcs) {
+    // Evita re-renderizar se o usuário estiver editando (para não perder o foco/texto)
+    if (document.querySelector('.inline-editor')) {
+      console.log('Renderização ignorada: usuário editando');
+      return;
+    }
+
     lastRenderedProcs = currentDataStr;
     renderProcList();
   }
