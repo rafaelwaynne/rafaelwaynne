@@ -526,7 +526,26 @@ const server = app.listen(PORT, () => {
 });
 
 const wss = new WebSocketServer({ server });
+
+function heartbeat() {
+  this.isAlive = true;
+}
+
 wss.on('connection', (ws) => {
   sockets.add(ws);
+  ws.isAlive = true;
+  ws.on('pong', heartbeat);
   ws.on('close', () => sockets.delete(ws));
+});
+
+const interval = setInterval(() => {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) return ws.terminate();
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, 30000);
+
+wss.on('close', () => {
+  clearInterval(interval);
 });

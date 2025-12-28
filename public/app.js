@@ -54,9 +54,9 @@ function connectWS() {
     console.log('WS desconectado. Reconectando em 5s...');
     setTimeout(connectWS, 5000);
   };
-  ws.onerror = (err) => {
-    console.error('Erro no WS:', err);
-    ws.close();
+  ws.onerror = () => {
+    // Silently close on error to trigger onclose/reconnect
+    try { ws.close(); } catch {}
   };
 }
 
